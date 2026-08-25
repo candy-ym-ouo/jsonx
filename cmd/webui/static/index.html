@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>jsonx Playground</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <header><div><h1>jsonx</h1><p>JSON parser playground</p></div><button id="sample">载入示例</button></header>
+    <section class="editors">
+      <label>输入 JSON<textarea id="input" spellcheck="false">{"users":[{"name":"Ada","age":36}],"ok":true}</textarea></label>
+      <label>Schema（可选）<textarea id="schema" spellcheck="false">{"type":"object","required":["users"],"properties":{"users":{"type":"array","minItems":1}}}</textarea></label>
+    </section>
+    <section class="toolbar">
+      <button data-action="parse">Parse</button><button data-action="format">Format</button><button data-action="validate">Validate</button>
+      <label>缩进 <select id="indent"><option value="  ">2</option><option value="    ">4</option><option value="">压缩</option></select></label>
+      <label><input type="checkbox" id="sort"> 排序键</label>
+    </section>
+    <section class="path"><input id="path" value="$.users[0].name" aria-label="JSONPath"><button data-action="path">提取路径</button></section>
+    <section class="output"><div id="status">Ready</div><pre id="result"></pre></section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
