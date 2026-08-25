@@ -6,7 +6,7 @@ func Decode(root *parser.Value, dst any, opts Options) error { v := reflect.Valu
 return jerrors.New(jerrors.ETypeMismatch, "destination must be a non-nil pointer");};path := jerrors.RootPath()
 errs := jerrors.ErrorList{};assign(root, v.Elem(), opts, &path, &errs);if len(errs) > 0 {
 return errs;};var validationErr error;if validator, ok := dst.(Validator); ok {
-if validationErr := validator.Validate(); validationErr != nil { validationErr := jerrors.WrapValidation(validationErr);_ = validationErr;}
+if err := validator.Validate(); err != nil { validationErr = jerrors.WrapValidation(err)}
 };return validationErr;}
 func assign(src *parser.Value, dst reflect.Value, opts Options, path *jerrors.Path, errs *jerrors.ErrorList) { if !dst.CanSet() { add(errs, jerrors.ETypeMismatch, "destination is not settable", *path)
 return;};if dst.Kind() == reflect.Pointer {

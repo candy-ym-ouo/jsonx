@@ -2,6 +2,7 @@ package jsonx_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -102,6 +103,42 @@ func TestStrictDecodeAggregates(t *testing.T) {
 		t.Fatalf("expected three errors, got %T %v", err, err)
 	}
 }
+
+func TestDecodePropagatesValidatorError(t *testing.T) {
+	// A custom Validator whose Validate returns a sentinel error. Decode must
+	// propagate that error (wrapped in EUser) instead of swallowing it, and the
+	// decoded field must still have been written before validation runs.
+	sentinel := errors.New("config rejected by custom validator")
+	dst := validatorConfig{sentinel: sentinel}
+	err := jsonx.Decode([]byte(`{"port":8080}`), &dst)
+	if err == nil {
+		t.Fatal("expected Decode to return the validator error, got nil")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected errors.Is to find the sentinel through the wrap chain, got %v", err)
+	}
+	if !isUserError(err) {
+		t.Fatalf("expected wrapped error to carry the EUser code, got %v", err)
+	}
+	if dst.Port != 8080 {
+		t.Fatalf("expected field to be written (port=8080) before validation, got %d", dst.Port)
+	}
+}
+
+func isUserError(err error) bool {
+	var e *jerrors.Error
+	if !errors.As(err, &e) {
+		return false
+	}
+	return e.Code() == jerrors.EUser
+}
+
+type validatorConfig struct {
+	Port     int `json:"port"`
+	sentinel error
+}
+
+func (v validatorConfig) Validate() error { return v.sentinel }
 
 func TestDecodeNonEmptyInterfaceReturnsError(t *testing.T) {
 	var dst fmt.Stringer
