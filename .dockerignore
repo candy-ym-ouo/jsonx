@@ -1,0 +1,10 @@
+.git
+.gitignore
+dist
+*.zip
+*.test
+*.out
+coverage.*
+.DS_Store
+.idea
+.vscode
