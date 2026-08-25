@@ -1,0 +1,13 @@
+# Local build outputs
+/dist/
+/*.zip
+
+# Go test and profiling artifacts
+*.test
+*.out
+coverage.*
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
