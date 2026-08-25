@@ -3,9 +3,11 @@ package parser
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	jerrors "jsonx/errors"
+	"sync"
 )
 
 // StreamReader incrementally reads root-array elements. Only the current
@@ -22,16 +24,147 @@ type StreamReader struct {
 func NewStreamReader(r io.Reader, opts Options) *StreamReader {
 	return &StreamReader{reader: bufio.NewReaderSize(r, 32<<10), opts: opts, first: true}
 }
-func StreamValues(r io.Reader, opts Options) <-chan *Value {
+// StreamValues incrementally parses the root value or root-array elements of r
+// and delivers each *Value on the returned channel.
+//
+// Lifecycle: the returned channel is closed once parsing completes — whether
+// the stream runs to completion, the caller stops early via stop, or the
+// underlying reader blocks forever (a pipe, socket, or other reader whose Read
+// never returns). In every case the producer goroutine exits rather than
+// accumulating per StreamValues invocation.
+//
+// The returned stop func signals the producer to abandon the remaining input;
+// call it when you stop consuming early (for example after the first element).
+// stop unblocks the producer whether it is parked on its next channel send or
+// blocked inside r.Read, and is idempotent: it is safe to call after the
+// channel has already drained, and at most one call has any effect. The caller
+// is never required to drain the channel to release the goroutine.
+//
+// Normal completion closes the channel after the last element, so ranging over
+// it until it closes is safe and terminates when the stream ends.
+func StreamValues(r io.Reader, opts Options) (<-chan *Value, func()) {
 	values := make(chan *Value)
+	done := make(chan struct{})
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			close(done)
+			// If the reader can be closed, close it now so a producer parked
+			// inside r.Read (an io.Pipe with no further writes, a socket, ...)
+			// returns immediately. select-on-done covers the send path but
+			// cannot reach into a synchronous Read; closing the reader unblocks
+			// it directly. For non-blocking readers (strings, bytes) Close is a
+			// harmless no-op or absent.
+			if c, ok := r.(io.Closer); ok {
+				_ = c.Close()
+			}
+		})
+	}
 	go func() {
-		stream := NewStreamReader(r, opts)
+		defer close(values)
+		stream := NewStreamReader(&cancelableReader{r: r, done: done}, opts)
 		for stream.Next() {
-			values <- stream.Value()
+			select {
+			case values <- stream.Value():
+			case <-done:
+				return
+			}
 		}
 	}()
-	return values
+	return values, stop
 }
+
+// cancelableReader makes a blocking io.Reader interruptible. A single
+// long-lived pump goroutine drives r.Read in a loop and hands each result to
+// Read through a buffered channel. Read selects between the next result and
+// done, so a blocked Read returns immediately when stop is called.
+//
+// The crucial property is that only one pump goroutine exists per stream, no
+// matter how many Read calls StreamReader makes — so there is no per-Read
+// goroutine accumulation. When done closes, the pump observes it on its next
+// loop iteration and exits; if r.Read is parked when that happens, the pump
+// stays parked until r is closed or produces data, but that is at most one
+// parked goroutine for the whole stream (collected when r is closed, as it is
+// for io.PipeReader and other closeable blocking readers via the stop func's
+// Close). For non-blocking readers (strings.NewReader, bytes.Reader) the pump
+// never parks, so nothing lingers. cancelableReader does not alter the data or
+// buffering StreamReader observes: it forwards bytes and errors verbatim.
+type cancelableReader struct {
+	r    io.Reader
+	done <-chan struct{}
+
+	// Single pump for all Read calls. Allocated lazily on first Read so that a
+	// stream whose goroutine never reaches a read (e.g. already done) pays
+	// nothing.
+	pumpMu  sync.Mutex
+	result  chan readResult
+	started bool
+}
+
+type readResult struct {
+	n   int
+	err error
+	buf []byte
+}
+
+// ensurePump starts the single pump goroutine if it has not been started yet.
+func (c *cancelableReader) ensurePump() {
+	c.pumpMu.Lock()
+	defer c.pumpMu.Unlock()
+	if c.started {
+		return
+	}
+	c.started = true
+	c.result = make(chan readResult, 1)
+	go c.pump()
+}
+
+// pump calls r.Read in a loop, forwarding each result. It stops when it sees
+// done closed between reads (without a pending r.Read) so it can exit cleanly
+// after normal end-of-input too.
+func (c *cancelableReader) pump() {
+	for {
+		select {
+		case <-c.done:
+			return
+		default:
+		}
+		// Issue a Read into a fresh buffer; only the n/err are forwarded, the
+		// bytes are copied into the caller's slice by Read below. We cannot let
+		// r write directly into the caller's p across the async boundary
+		// safely, so Read copies from this local buffer.
+		buf := make([]byte, 4096)
+		n, err := c.r.Read(buf)
+		select {
+		case c.result <- readResult{n: n, err: err, buf: buf[:n]}:
+		case <-c.done:
+			return
+		}
+	}
+}
+
+func (c *cancelableReader) Read(p []byte) (int, error) {
+	select {
+	case <-c.done:
+		return 0, errStreamCanceled
+	default:
+	}
+	c.ensurePump()
+	select {
+	case res := <-c.result:
+		copy(p, res.buf)
+		return len(res.buf), res.err
+	case <-c.done:
+		return 0, errStreamCanceled
+	}
+}
+
+// errStreamCanceled is the sentinel returned by cancelableReader.Read once stop
+// interrupts a blocked read. StreamReader surfaces it through Err() as
+// io.ErrUnexpectedEOF via unexpectedEOF, which is the same status a truncated
+// stream already reports — so a stopped stream looks like an ended stream to
+// the consumer rather than as a spurious parse error.
+var errStreamCanceled = errors.New("jsonx: stream values canceled")
 func (s *StreamReader) Next() bool {
 	if s.err != nil || s.done {
 		return false

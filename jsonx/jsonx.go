@@ -40,7 +40,18 @@ func NewStreamReader(r io.Reader, options ...Option) *parser.StreamReader {
 	o := resolve(options)
 	return parser.NewStreamReader(r, parserOptions(o))
 }
-func StreamValues(r io.Reader, options ...Option) <-chan *parser.Value {
+// StreamValues incrementally parses the root value or root-array elements of r
+// and delivers each *Value on the returned channel.
+//
+// The returned stop func signals the producer goroutine to abandon any remaining
+// input; call it when you stop consuming early (for example after the first
+// element) so the goroutine exits instead of blocking forever on its next send.
+// The channel is closed once parsing completes or stop is honored, so ranging
+// over it until it closes is safe and terminates when the stream ends normally.
+//
+// The returned stop func is idempotent: it is safe to call after the channel has
+// already drained, and at most one call has any effect.
+func StreamValues(r io.Reader, options ...Option) (<-chan *parser.Value, func()) {
 	o := resolve(options)
 	return parser.StreamValues(r, parserOptions(o))
 }
