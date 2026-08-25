@@ -62,8 +62,13 @@ func Marshal(value any, options ...Option) ([]byte, error) {
 	o := resolve(options)
 	rv := reflect.ValueOf(value)
 	if rv.IsValid() && rv.Kind() == reflect.Pointer && rv.IsNil() {
-		if marshaler, ok := value.(encode.Marshaler); ok {
-			return encode.MarshalDirect(marshaler, encodeOptions(o))
+		if _, ok := value.(encode.Marshaler); ok {
+			// Typed nil pointer implementing Marshaler: never invoke the
+			// method on a nil receiver — it would dereference nil fields and
+			// panic. Encode as null, mirroring encoding/json. Non-nil custom
+			// Marshalers still flow through encode.Marshal below, preserving
+			// their return-value and error-wrapping behavior unchanged.
+			return []byte("null"), nil
 		}
 	}
 	return encode.Marshal(value, encodeOptions(o))
