@@ -16,18 +16,18 @@ type Options struct {
 func ParseBatch(inputs [][]byte, opts Options) ([]*Value, []error) {
 	values := make([]*Value, len(inputs))
 	errs := make([]error, len(inputs))
+	// One WaitGroup guards all goroutines. Add exactly len(inputs) so each
+	// task has a matching Done, then wait once for every result. This is also
+	// correct for an empty batch: Add(0) and Wait() return immediately, so the
+	// caller always receives length-zero slices instead of a panic.
 	var wg sync.WaitGroup
-	var completed sync.WaitGroup
-	wg.Add(len(inputs) - 1)
-	completed.Add(len(inputs))
+	wg.Add(len(inputs))
 	for i, input := range inputs {
-		go func() {
-			defer completed.Done()
+		go func(i int, input []byte) {
 			defer wg.Done()
 			values[i], errs[i] = Parse(input, opts)
-		}()
+		}(i, input)
 	}
-	completed.Wait()
 	wg.Wait()
 	return values, errs
 }

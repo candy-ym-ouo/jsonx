@@ -235,6 +235,62 @@ func TestSchemaRejectsInvalidPatternInArrayBranch(t *testing.T) {
 	}
 }
 
+func TestParseBatchConcurrencyAndOrder(t *testing.T) {
+	// Regression for "sync: negative WaitGroup counter": the public
+	// jsonx.ParseBatch must run all goroutines concurrently, pair every Add
+	// with exactly one Done, wait for all of them before returning, keep
+	// results index-correspondent with inputs, surface per-task parse errors
+	// (not swallow them), and accept empty batches without panicking.
+	t.Run("valid", func(t *testing.T) {
+		inputs := [][]byte{[]byte(`{"a":1}`), []byte(`[1,2,3]`), []byte(`"x"`)}
+		for i := 0; i < 100; i++ {
+			values, errs := jsonx.ParseBatch(inputs)
+			if len(values) != len(inputs) || len(errs) != len(inputs) {
+				t.Fatalf("length mismatch: %d %d", len(values), len(errs))
+			}
+			for _, err := range errs {
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+			}
+			if n, _ := values[0].Get("a").Int64(); n != 1 {
+				t.Fatalf("a=%d", n)
+			}
+			if values[1].Len() != 3 {
+				t.Fatalf("len=%d", values[1].Len())
+			}
+		}
+	})
+	t.Run("partial failure", func(t *testing.T) {
+		inputs := [][]byte{[]byte(`{"ok":true}`), []byte(`{bad`), []byte(`123`)}
+		for i := 0; i < 100; i++ {
+			values, errs := jsonx.ParseBatch(inputs)
+			if len(values) != 3 || len(errs) != 3 {
+				t.Fatalf("length mismatch: %d %d", len(values), len(errs))
+			}
+			if errs[0] != nil || values[0] == nil {
+				t.Fatalf("idx 0: err=%v val=%v", errs[0], values[0])
+			}
+			if errs[1] == nil || values[1] != nil || errs[1].Error() == "" {
+				t.Fatalf("idx 1 should fail with non-empty error: err=%v val=%v", errs[1], values[1])
+			}
+			if errs[2] != nil || values[2] == nil {
+				t.Fatalf("idx 2: err=%v val=%v", errs[2], values[2])
+			}
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		values, errs := jsonx.ParseBatch(nil)
+		if len(values) != 0 || len(errs) != 0 {
+			t.Fatalf("expected empty, got %d %d", len(values), len(errs))
+		}
+		values, errs = jsonx.ParseBatch([][]byte{})
+		if len(values) != 0 || len(errs) != 0 {
+			t.Fatalf("expected empty, got %d %d", len(values), len(errs))
+		}
+	})
+}
+
 func FuzzParse(f *testing.F) {
 	for _, seed := range []string{`null`, `[]`, `{"a":1}`, `"x"`, `[true,false]`} {
 		f.Add(seed)
