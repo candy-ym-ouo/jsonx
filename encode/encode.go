@@ -56,7 +56,7 @@ for i, item := range v.Values() { if i > 0 { e.b.WriteByte(',')
 return err;};}
 if v.Len() > 0 { e.layout.newline(e.b, depth);}
 e.b.WriteByte(']');case parser.Object: members := v.Members()
-if e.opts.SortKeys { sort.Slice(members, func(i, j int) bool { return members[i].Key < members[j].Key });}
+if e.opts.SortKeys { cp := make([]parser.Member, len(members));copy(cp, members);sort.Slice(cp, func(i, j int) bool { return cp[i].Key < cp[j].Key });members = cp;}
 e.b.WriteByte('{');for i, item := range members { if i > 0 {
 e.b.WriteByte(',');};e.layout.newline(e.b, depth+1)
 appendEscapedString(e.b, item.Key, e.opts.EscapeHTML);e.b.WriteByte(':');if e.opts.Indent != "" {

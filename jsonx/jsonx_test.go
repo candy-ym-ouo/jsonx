@@ -235,6 +235,68 @@ func TestSchemaRejectsInvalidPatternInArrayBranch(t *testing.T) {
 	}
 }
 
+func TestSortKeysDoesNotMutateParsedTree(t *testing.T) {
+	// Objects preserve source key order; sorting during one Marshal must not
+	// leak back into the parsed tree and reorder subsequent non-sorting output.
+	data := []byte(`{"c":3,"a":1,"b":2}`)
+	v, err := jsonx.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSource := `{"c":3,"a":1,"b":2}`
+	wantSorted := `{"a":1,"b":2,"c":3}`
+
+	// Baseline: an unsorted marshal reflects source order.
+	if got, err := jsonx.Marshal(v); err != nil {
+		t.Fatal(err)
+	} else if string(got) != wantSource {
+		t.Fatalf("baseline marshal = %s, want %s", got, wantSource)
+	}
+
+	// A single sorted marshal must reorder only this output, not the tree.
+	if got, err := jsonx.Marshal(v, jsonx.SortKeys(true)); err != nil {
+		t.Fatal(err)
+	} else if string(got) != wantSorted {
+		t.Fatalf("sorted marshal = %s, want %s", got, wantSorted)
+	}
+
+	// The tree itself is unchanged: Keys, Members and a fresh marshal keep
+	// source order, and repeating the sort stays stable.
+	if got := v.Keys(); !reflect.DeepEqual(got, []string{"c", "a", "b"}) {
+		t.Fatalf("keys after sort = %v", got)
+	}
+	if got, err := jsonx.Marshal(v); err != nil {
+		t.Fatal(err)
+	} else if string(got) != wantSource {
+		t.Fatalf("post-sort marshal = %s, want %s (tree was mutated)", got, wantSource)
+	}
+	if got, err := jsonx.Marshal(v, jsonx.SortKeys(true)); err != nil {
+		t.Fatal(err)
+	} else if string(got) != wantSorted {
+		t.Fatalf("second sorted marshal = %s, want %s", got, wantSorted)
+	}
+
+	// Nested objects must not be mutated either.
+	nested := []byte(`{"z":{"y":2,"x":1},"k":0}`)
+	nv, err := jsonx.Parse(nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := jsonx.Marshal(nv, jsonx.SortKeys(true)); err != nil {
+		t.Fatal(err)
+	}
+	if inner, ok := nv.Lookup("z"); !ok {
+		t.Fatal("lookup z failed")
+	} else if got := inner.Keys(); !reflect.DeepEqual(got, []string{"y", "x"}) {
+		t.Fatalf("nested keys mutated = %v, want [y x]", got)
+	}
+	if got, err := jsonx.Marshal(nv); err != nil {
+		t.Fatal(err)
+	} else if string(got) != `{"z":{"y":2,"x":1},"k":0}` {
+		t.Fatalf("nested tree mutated by sort: %s", got)
+	}
+}
+
 func FuzzParse(f *testing.F) {
 	for _, seed := range []string{`null`, `[]`, `{"a":1}`, `"x"`, `[true,false]`} {
 		f.Add(seed)
