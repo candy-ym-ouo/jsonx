@@ -14,6 +14,12 @@ type Options struct {
 type Option func(*Options)
 
 func defaults() Options { return Options{MaxDepth: 512, EscapeHTML: true, NumberAsFloat64: true} }
+
+// resolve builds a fresh Options value from the package defaults for a single
+// call. Each call starts from defaults() so a previously applied option (such as
+// AllowComments) never leaks into a later call that omits the option. Because
+// resolve never touches package-level state, concurrent calls with differing
+// options do not share mutable state and stay race-free.
 func resolve(options []Option) Options {
 	o := defaults()
 	for _, apply := range options {
@@ -25,17 +31,6 @@ func resolve(options []Option) Options {
 		o.MaxDepth = 512
 	}
 	return o
-}
-
-var sharedOptions = defaults()
-
-func resolveShared(options []Option) Options {
-	for _, apply := range options {
-		if apply != nil {
-			apply(&sharedOptions)
-		}
-	}
-	return sharedOptions
 }
 func WithOptions(value Options) Option {
 	return func(o *Options) {

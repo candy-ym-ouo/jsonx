@@ -21,7 +21,7 @@ func encodeOptions(o Options) encode.Options {
 	return encode.Options{EscapeHTML: o.EscapeHTML, SortKeys: o.SortKeys, MaxDepth: o.MaxDepth}
 }
 func Parse(data []byte, options ...Option) (*parser.Value, error) {
-	o := resolveShared(options)
+	o := resolve(options)
 	return parser.Parse(data, parserOptions(o))
 }
 func ParseAny(data []byte, options ...Option) (any, error) {
@@ -58,7 +58,7 @@ func DecodeValue(value *parser.Value, dst any, options ...Option) error {
 	return decode.Decode(value, dst, decodeOptions(o))
 }
 func Marshal(value any, options ...Option) ([]byte, error) {
-	o := resolveShared(options)
+	o := resolve(options)
 	return encode.Marshal(value, encodeOptions(o))
 }
 func MarshalIndent(value any, prefix, indent string, options ...Option) ([]byte, error) {
